@@ -1,0 +1,8 @@
+/.classpath
+/.settings
+/.project
+/target/
+/bin/
+/settings.xml
+/log.txt
+**/spikes
