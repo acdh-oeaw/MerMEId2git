@@ -6,9 +6,6 @@ import java.util.List;
 import org.xmldb.api.base.Collection;
 import org.xmldb.api.base.XMLDBException;
 
-/*
- * TODO : refactor into reusables
- */
 /**
  * 
  * @author mcupak
@@ -16,30 +13,36 @@ import org.xmldb.api.base.XMLDBException;
  */
 public class MermeidExistdbClient extends ExistdbClient {
 
-	private final Collection dbCollectionMermeid;
-	
+	protected final File mermeidDataDir;
+	protected final Collection mermeidCollection;
+
 	public MermeidExistdbClient(MermeidExistdbConnectionInfo meci, File repoDir) throws ExistdbClientException {
 		super(meci, repoDir);
 		try {
-			dbCollectionMermeid = rootCollection.getChildCollection(meci.collectionName);
+			mermeidCollection = rootCollection.getChildCollection(meci.collectionName);
 			
 		} catch (XMLDBException e) {
 			throw new ExistdbClientException("Unable to get Mermeid collection", e);
 		}
+		mermeidDataDir = new File(rootCollectionDir, meci.collectionName);
 	}
 	
-	public void download(List<String> includeResourceNames, List<String> excludeResourceNames) throws ExistdbClientException {
-		super.download(dbCollectionMermeid, includeResourceNames, excludeResourceNames);
+	public void download(List<String> includeResourceNames, List<String> excludeResourceNames) throws XMLDBException {
+		super.download(mermeidCollection, includeResourceNames, excludeResourceNames);
 	}
 	
-	public void close() throws ExistdbClientException {
-		try {
-			if (dbCollectionMermeid != null) {
-				dbCollectionMermeid.close();
-			}
-		} catch (XMLDBException e) {
-			throw new ExistdbClientException("cannot close Mermeid collection", e);
+	public void close() throws XMLDBException {
+		if (mermeidCollection != null) {
+			mermeidCollection.close();
 		}
 		super.close();
+	}
+	
+	public File getMermeidDataDir() {
+		return mermeidDataDir;
+	}
+
+	public Collection getMermeidCollection() {
+		return mermeidCollection;
 	}
 }

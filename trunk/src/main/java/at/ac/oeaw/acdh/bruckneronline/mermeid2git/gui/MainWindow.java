@@ -30,6 +30,7 @@ import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
@@ -121,15 +122,15 @@ public class MainWindow extends JFrame {
 		jpMain.add(jslpSplitPane, gbc);
 		gbc.gridy++;
 
-		JButton jbPullAndDownload = createJButton("Download & report changes", 'D', false);
+		JButton jbCleanupAndDownload = createJButton("Download & report changes", 'D', false);
 		JButton jbReportChanges = createJButton("Report changes only", 'R', false);
 		JButton jbCommitAndPush = createJButton("Commit & push", 'C', false);
 		JButton jbSettings = createJButton("Settings", 't', true);
 		
-		ActionListener alPullAndDownload = new ActionListener() {
+		ActionListener alCleanupAndDownload = new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				jbPullAndDownload.setEnabled(false);
+				jbCleanupAndDownload.setEnabled(false);
 				jbReportChanges.setEnabled(false);
 				jbCommitAndPush.setEnabled(false);
 				
@@ -137,7 +138,8 @@ public class MainWindow extends JFrame {
 					@Override
 					protected Object doInBackground() throws Exception {
 						app.checkoutAll();
-						app.pull();
+//						app.pull();
+						app.cleanupLocalDataDirectory();
 						app.download();
 						return null;
 					}
@@ -159,7 +161,7 @@ public class MainWindow extends JFrame {
 		ActionListener alReportChanges = new ActionListener() {
 			@Override
 			public void actionPerformed(ActionEvent e) {
-				jbPullAndDownload.setEnabled(false);
+				jbCleanupAndDownload.setEnabled(false);
 				jbReportChanges.setEnabled(false);
 				jbCommitAndPush.setEnabled(false);
 				
@@ -174,7 +176,7 @@ public class MainWindow extends JFrame {
 					protected void done() {
 						try {
 							get();
-							jbPullAndDownload.setEnabled(true);
+							jbCleanupAndDownload.setEnabled(true);
 							jbReportChanges.setEnabled(true);
 							if (!resTab.model.isEmpty()) {
 								jbCommitAndPush.setEnabled(true);
@@ -193,7 +195,7 @@ public class MainWindow extends JFrame {
 			public void actionPerformed(ActionEvent e) {
 				jbCommitAndPush.setEnabled(false);
 				jbReportChanges.setEnabled(false);
-				jbPullAndDownload.setEnabled(false);
+				jbCleanupAndDownload.setEnabled(false);
 				
 				new SwingWorker<Object, Object>() {
 					@Override
@@ -210,7 +212,7 @@ public class MainWindow extends JFrame {
 					protected void done() {
 						try {
 							get();
-							jbPullAndDownload.setEnabled(true);
+							jbCleanupAndDownload.setEnabled(true);
 							alReportChanges.actionPerformed(null);
 							jbReportChanges.setEnabled(true);
 							
@@ -222,7 +224,7 @@ public class MainWindow extends JFrame {
 			}
 		};
 		
-		jbPullAndDownload.addActionListener(alPullAndDownload);
+		jbCleanupAndDownload.addActionListener(alCleanupAndDownload);
 		jbReportChanges.addActionListener(alReportChanges);
 		jbCommitAndPush.addActionListener(alCommitAndPush);
 		
@@ -235,7 +237,7 @@ public class MainWindow extends JFrame {
 		
 		gbc.gridwidth = 1;
 		gbc.weighty = 0;
-		jpMain.add(jbPullAndDownload, gbc);
+		jpMain.add(jbCleanupAndDownload, gbc);
 		gbc.gridx++;
 		
 		jpMain.add(jbReportChanges, gbc);
@@ -332,7 +334,7 @@ public class MainWindow extends JFrame {
 			
 			@Override
 			public void pushDone() {
-				jbPullAndDownload.setEnabled(true);
+				jbCleanupAndDownload.setEnabled(true);
 				jbReportChanges.setEnabled(true);
 			}
 
@@ -343,7 +345,7 @@ public class MainWindow extends JFrame {
 
 			@Override
 			public void downloadDone() {
-				jbPullAndDownload.setEnabled(true);
+				jbCleanupAndDownload.setEnabled(true);
 				jbReportChanges.setEnabled(true);
 				jbReportChanges.doClick();
 			}
@@ -362,7 +364,7 @@ public class MainWindow extends JFrame {
 				} catch (InterruptedException | ExecutionException e) {
 					throw new SwingException(e);
 				}
-				jbPullAndDownload.setEnabled(true);
+				jbCleanupAndDownload.setEnabled(true);
 				jbReportChanges.setEnabled(true);
 			}
 		}.execute();
@@ -375,7 +377,8 @@ public class MainWindow extends JFrame {
 		COMMIT_MESSAGE("Commit message", true, 750, String.class, CompareBy.COMMIT_MESSAGE),
 		RESPONSIBLE("Responsible", false, 250, String.class, CompareBy.RESPONSIBLE),
 		COMMIT_AS("Commit as", true, 100, Commiter.class, CompareBy.COMMITER_NAME),
-		INCLUDE("Include?", true, 50, Boolean.class, CompareBy.SKIP_FLAG);
+		INCLUDE("Include?", true, 50, Boolean.class, CompareBy.SKIP_FLAG),
+		INITIAL_STATE("State", false, 100, String.class, CompareBy.INITIAL_STATE);
 		
 		public final String name;
 		public final boolean isEditable;
@@ -406,34 +409,38 @@ public class MainWindow extends JFrame {
 			setAutoCreateRowSorter(false);
 //			indicateSorting();
 			
-			CommiterRenderer cr = new CommiterRenderer();
+			CommiterTableCellRenderer ctcr = new CommiterTableCellRenderer();
 			
 			JComboBox<Commiter> jcbCommiter = new JComboBox<>();
-			jcbCommiter.setRenderer(cr);
+			jcbCommiter.setRenderer(ctcr);
 			for (Commiter c : App.getInstance().getCommiters()) {
 				jcbCommiter.addItem(c);
 			}
 
 			TableColumn commitAsCol = getColumnModel().getColumn(ColumnMeta.COMMIT_AS.ordinal());
-			commitAsCol.setCellRenderer(cr);
+			commitAsCol.setCellRenderer(ctcr);
 			commitAsCol.setCellEditor(new DefaultCellEditor(jcbCommiter));
 			
 			ActionListener alIncludeAll = new ActionListener() {
 				@Override
 				public void actionPerformed(ActionEvent e) {
-					for (CommitProposal cp : model.rows) {
-						cp.setSkip(false);
+					synchronized (model) {
+						for (CommitProposal cp : model.rows) {
+							cp.setSkip(false);
+						}
+						model.fireTableDataChanged();
 					}
-					model.fireTableDataChanged();
 				}
 			};
 			ActionListener alExcludeAll = new ActionListener() {
 				@Override
 				public void actionPerformed(ActionEvent e) {
-					for (CommitProposal cp : model.rows) {
-						cp.setSkip(true);
+					synchronized (model) {
+						for (CommitProposal cp : model.rows) {
+							cp.setSkip(true);
+						}
+						model.fireTableDataChanged();
 					}
-					model.fireTableDataChanged();
 				}
 			};
 			
@@ -443,9 +450,28 @@ public class MainWindow extends JFrame {
 			JMenuItem jmiExcludeAll = new JMenuItem("Exclude all");
 			jmiExcludeAll.addActionListener(alExcludeAll);
 			
+			JMenu jmSetAllCommitAs = new JMenu("Set all 'Commit as' to");
+			for (Commiter commiter : App.getInstance().getCommiters()) {
+				JMenuItem jmiCommiter = new JMenuItem(commiter.toConfigString(true));
+				jmiCommiter.addActionListener(new ActionListener() {
+					@Override
+					public void actionPerformed(ActionEvent e) {
+						synchronized (model) {
+							for (CommitProposal cp : model.rows) {
+								cp.setCommiter(commiter);
+							}
+							model.fireTableDataChanged();
+						}
+					}
+				});
+				jmSetAllCommitAs.add(jmiCommiter);
+			}
+			
 			JPopupMenu jpmHeaderPopupMenu = new JPopupMenu();
 			jpmHeaderPopupMenu.add(jmiIncludeAll);
 			jpmHeaderPopupMenu.add(jmiExcludeAll);
+			jpmHeaderPopupMenu.addSeparator();
+			jpmHeaderPopupMenu.add(jmSetAllCommitAs);
 			
 			JTable thisTable = this;
 			addMouseListener(new MouseAdapter() {
@@ -507,7 +533,7 @@ public class MainWindow extends JFrame {
 			}
 		}
 		
-		private class CommiterRenderer implements ListCellRenderer<Commiter>, TableCellRenderer {
+		private class CommiterTableCellRenderer implements ListCellRenderer<Commiter>, TableCellRenderer {
 
 			private final DefaultListCellRenderer dlcr = new DefaultListCellRenderer();
 			private final DefaultTableCellRenderer dtcr = new DefaultTableCellRenderer();
@@ -616,6 +642,9 @@ public class MainWindow extends JFrame {
 					
 				} else if (columnIndex == ColumnMeta.INCLUDE.ordinal()) {
 					return !cp.isSkip();
+					
+				} else if (columnIndex == ColumnMeta.INITIAL_STATE.ordinal()) {
+					return cp.initialState.toString();
 				}
 				
 				throw new IllegalArgumentException("columnIndex");

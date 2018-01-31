@@ -16,7 +16,8 @@ public class CommitProposalComparator implements Comparator<CommitProposal> {
 		RESPONSIBLE,
 		COMMIT_MESSAGE,
 		SKIP_FLAG,
-		COMMITER_NAME
+		COMMITER_NAME,
+		INITIAL_STATE
 	}
 	
 	private CompareBy compareBy;
@@ -85,6 +86,10 @@ public class CommitProposalComparator implements Comparator<CommitProposal> {
 				
 			case WAB:
 				ret = compareStr(o1.wab, o2.wab);
+				break;
+				
+			case INITIAL_STATE:
+				ret = compareStr(o1.initialState.toString(), o2.initialState.toString());
 				break;
 		}
 		if (!acsending) {

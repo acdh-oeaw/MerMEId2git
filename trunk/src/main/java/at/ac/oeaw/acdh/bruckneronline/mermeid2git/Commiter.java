@@ -37,6 +37,25 @@ public class Commiter {
 		}
 	}
 
+	public String toConfigString() {
+		return toConfigString(false);
+	}
+	
+	public String toConfigString(boolean omitAutoIncludeFlag) {
+		final StringBuilder sb = new StringBuilder()
+				.append(personIdent.getName())
+				.append(EMAIL_OPENING_BRACKET)
+				.append(personIdent.getEmailAddress())
+				.append(EMAIL_CLOSING_BRACKET);
+		
+		if (!omitAutoIncludeFlag
+				&& autoInclude) {
+			sb.append(" ").append(FLAG_AUTO_INCLUDE);
+		}
+		
+		return sb.toString();
+	}
+	
 	@Override
 	public int hashCode() {
 		final int prime = 31;

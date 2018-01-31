@@ -10,9 +10,9 @@ import java.io.File;
 public class CommitProposal {
 
 	public enum InitialState {
-		UNTRACKED("UT"),
-		UNCOMMITED("UC"),
-		REMOVED("RM");	// not yet implemented - the tool always downloads only, does not clear from local what is not found in MerMEId
+		UNTRACKED("Add"),
+		MODIFIED("Mod"),
+		MISSING("Del");
 		
 		private final String toString;
 		

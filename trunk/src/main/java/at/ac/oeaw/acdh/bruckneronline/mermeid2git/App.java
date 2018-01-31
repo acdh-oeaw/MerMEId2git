@@ -9,9 +9,8 @@ import java.security.CodeSource;
 import java.security.ProtectionDomain;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.logging.Level;
 
 import javax.swing.SwingUtilities;
@@ -37,6 +36,7 @@ import org.eclipse.jgit.api.errors.JGitInternalException;
 import org.eclipse.jgit.transport.UsernamePasswordCredentialsProvider;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
+import org.xmldb.api.base.XMLDBException;
 
 import at.ac.oeaw.acdh.bruckneronline.mermeid2git.CommitProposal.InitialState;
 import at.ac.oeaw.acdh.bruckneronline.mermeid2git.db.ExistdbClientCallback;
@@ -69,7 +69,7 @@ public class App {
 	private final List<AppCallback> callbacks;
 	private final DocumentBuilder documentBuilder;
 	private final XPathExpression xpeWab, xpeTitle, xpeLastChangeDescription, xpeResponsible;
-	private final Map<String, Commiter> commiters;
+	private final LinkedHashMap<String, Commiter> commiters;
 
 	private MermeidExistdbClient dbClient;
 	
@@ -101,7 +101,7 @@ public class App {
 
 		DocumentBuilder tmpDocBuilder = null;
 		XPathExpression tmpXpeWab = null, tmpXpeTitle = null, tmpXpeLastChangeDescription = null, tmpXpeResponsible = null;
-		Map<String, Commiter> tmpCommiters = null;
+		LinkedHashMap<String, Commiter> tmpCommiters = null;
 
 		try {
 			if (settingsXml.exists()
@@ -162,7 +162,7 @@ public class App {
 			}
 			
 			// init commiters-map
-			tmpCommiters = new HashMap<>();
+			tmpCommiters = new LinkedHashMap<>();
 			final String strCommiters = settings.get("git.committers");
 			if (strCommiters == null) {
 				throw new ExitException("no commiters defined in settings INI", ExitCode.NO_COMMITTERS_DEFINED);
@@ -217,7 +217,7 @@ public class App {
 			
 			dbClient.addCallback(new ExistdbClientCallback() {
 				@Override
-				public void skippingResource(String resourceName) {
+				public void resourceSkipped(String resourceName) {
 					lgr.info("skipping resource '" + resourceName + "'");
 				}
 				
@@ -227,21 +227,41 @@ public class App {
 				}
 				
 				@Override
-				public void downloadStarted(String resourceName) {
+				public void resourceDownloadStarted(String resourceName) {
 					lgr.info("downloading resource '" + resourceName + "'");
 				}
 				
 				@Override
-				public void downloadFinished(File f, long duration) {
+				public void resourceDownloadFinished(File f, long duration) {
 					lgr.info("file '" + f.getAbsolutePath() + "' downloaded in " + duration + " [ms]");
 				}
 
 				@Override
-				public void downloadFinished(String collectionName, int resourceCount, long duration) {
-					lgr.info("collection '" + collectionName + "' with " + resourceCount + " resources downloaded in " + duration + " [ms]");
+				public void collectionDownloadStarted(String collectionName) {
+					lgr.info("downloading collection '" + collectionName + "'");
+				}
+
+				@Override
+				public void collectionDownloadFinished(String collectionName, long duration) {
+					lgr.info("collection '" + collectionName + "' downloaded in " + duration + " [ms]");
 					for (AppCallback ac : callbacks) {
 						ac.downloadDone();
 					}
+				}
+
+				@Override
+				public void collectionSkipped(String collectionName) {
+					lgr.info("skipping collection '" + collectionName + "'");
+				}
+
+				@Override
+				public void recursiveDownloadStarted(String rootCollectionName) {
+					lgr.info("recursively downloading root collection '" + rootCollectionName + "'");
+				}
+
+				@Override
+				public void recursiveDownloadFinished(String rootCollectionName, long duration) {
+					lgr.info("root collection '" + rootCollectionName + "' downloaded in " + duration + " [ms]");
 				}
 			});
 			
@@ -264,7 +284,26 @@ public class App {
 		}
 	}
 	
-	public synchronized void download() throws ExistdbClientException, GitAPIException {
+	public synchronized void cleanupLocalDataDirectory() {
+		final File mermeidDataDir = dbClient.getMermeidDataDir();
+		lgr.info("cleaning up local MerMEId data directory '" + mermeidDataDir.getAbsolutePath() + "'");
+		
+		final long tsStart = System.currentTimeMillis();
+		
+		for (File f : dbClient.getMermeidDataDir().listFiles()) {
+			if (f.delete()) {
+				lgr.info("deleted file '" + f.getAbsolutePath() + "'");
+				
+			} else {
+				lgr.warning("failed to clean up data file '" + f.getAbsolutePath() + "'");
+			}
+		}
+		
+		final long duration = System.currentTimeMillis() - tsStart;
+		lgr.info("cleanup complete in " + duration + " [ms]");
+	}
+	
+	public synchronized void download() throws XMLDBException {
 		dbClient.download(null, null);
 	}
 	
@@ -272,11 +311,14 @@ public class App {
 		StatusCommand sc = gitRepo.status();
 		Status s = sc.call();
 		
-		for (String uncommitedChange : s.getUncommittedChanges()) {
-			getChanges(uncommitedChange, InitialState.UNCOMMITED);
-		}
-		for (String untrackedChange : s.getUntracked()) {
+		for (String untrackedChange : s.getUntracked()) {	// git status: untracked (to add)
 			getChanges(untrackedChange, InitialState.UNTRACKED);
+		}
+		for (String modifiedChange : s.getModified()) {	// git status: modified
+			getChanges(modifiedChange, InitialState.MODIFIED);
+		}
+		for (String missingChange : s.getMissing()) {	// git status: deleted
+			getChanges(missingChange, InitialState.MISSING);
 		}
 	}
 	
@@ -414,7 +456,7 @@ public class App {
 			try {
 				dbClient.close();
 				
-			} catch (ExistdbClientException dce) {
+			} catch (XMLDBException dce) {
 				lgr.log(Level.WARNING, "exception while closing database client", dce);
 			}
 		}
@@ -433,7 +475,10 @@ public class App {
 		String strWab = null, strTitle = null, strLastCommitMessage = null, strResponsible = null;
 		Commiter commiter = null;
 
-		if (f.getName().toLowerCase().endsWith(".xml")) {
+		if (!f.exists()) {
+			strLastCommitMessage = "File deleted";
+			
+		} else if (f.getName().toLowerCase().endsWith(".xml")) {
 			Document doc = documentBuilder.parse(f);
 			
 			try {

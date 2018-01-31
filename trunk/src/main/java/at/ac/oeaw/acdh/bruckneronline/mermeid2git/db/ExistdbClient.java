@@ -21,7 +21,7 @@ import org.xmldb.api.base.XMLDBException;
  */
 public class ExistdbClient {
 	
-	protected final File rootDir;
+	protected final File rootCollectionDir;
 	protected final Collection rootCollection;
 	
 	protected final List<ExistdbClientCallback> callbacks;
@@ -51,131 +51,182 @@ public class ExistdbClient {
 		} catch (IOException e) {
 			throw new ExistdbClientException("unable to initialize root directory", e);
 		}
-		this.rootDir = rootDir;
+		this.rootCollectionDir = new File(rootDir, ExistdbConnectionInfo.ROOT_COLLECTION_NAME);
 	}
 	
 	public Collection getRootCollection() {
 		return rootCollection;
 	}
 	
-	public File getRootDirectory() {
-		return rootDir;
+	public File getRootCollectionDirectory() {
+		return rootCollectionDir;
 	}
 	
 	public boolean addCallback(ExistdbClientCallback ecc) {
 		return callbacks.add(ecc);
 	}
 	
-	/**
-	 * Downloads resources from given {@link Collection} into {@link #getRootDirectory()}, using filtering if provided.
-	 * 
-	 * @param includeResourceNames include only resources with name being substring of this {@link List}, pass {@code null} for no filtering
-	 * @param excludeResourceNames , pass {@code null} for no filtering
-	 * @throws ExistdbClientException
-	 */
-	public void download(Collection c, List<String> includeResourceNames, List<String> excludeResourceNames) throws ExistdbClientException {
-		final long tsStartCompleteDownload = System.currentTimeMillis();
-		
-		try {
-			String dbPath = "";
-			Collection currentCollection = c;
-			while (currentCollection != null) {
-				String currentCollectionPath = currentCollection.getName();
-				String currentCollectionName = currentCollectionPath.substring(currentCollectionPath.lastIndexOf('/') + 1);
-				dbPath = File.separator + currentCollectionName + dbPath;
-				currentCollection = currentCollection.getParentCollection();
-			}
-			
-			File downloadTo = new File(rootDir + dbPath);
-			if (!downloadTo.exists()
-					&& !downloadTo.mkdirs()) {
-				for (ExistdbClientCallback ece : callbacks) {
-					ece.exceptionOccured(new ExistdbClientException("could not create directory '" + downloadTo.getAbsolutePath() + "'"));
-				}
-			}
-			
-			String[] resourceNames = c.listResources();
-			
-			if (resourceNames != null) {
-				for (String resourceName : resourceNames) {
-					final long tsStartCurrentResoruce = System.currentTimeMillis();
-					
-					if ((includeResourceNames != null
-							&& !containsAsSubstring(resourceName, includeResourceNames))
-						|| (excludeResourceNames != null
-							&& containsAsSubstring(resourceName, excludeResourceNames))
-						) {
-						for (ExistdbClientCallback ece : callbacks) {
-							ece.skippingResource(resourceName);
-						}
-						continue;
-					}
-					
-					for (ExistdbClientCallback ece : callbacks) {
-						ece.downloadStarted(resourceName);
-					}
-					
-					EXistResource resource = (EXistResource) c.getResource(resourceName);
-					
-					File xmlFile = new File(downloadTo, resource.getId());
-					if (xmlFile.exists()
-							&& !xmlFile.delete()) {
-						for (ExistdbClientCallback ece : callbacks) {
-							ece.exceptionOccured(new ExistdbClientException("could not delete file '" + xmlFile.getAbsolutePath() + "'"));
-						}
-						continue;
-					}
-					
-					try {
-						if (!xmlFile.createNewFile()) {
-							for (ExistdbClientCallback ece : callbacks) {
-								ece.exceptionOccured(new ExistdbClientException("could not create file '" + xmlFile.getAbsolutePath() + "'"));
-							}
-							continue;
-						}
-						
-						String xml = (String) resource.getContent();
-						FileOutputStream fos = new FileOutputStream(xmlFile);
-						OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
-						osw.write(xml);
-						osw.flush();
-						osw.close();
+	public void recursiveDownload(List<String> colNameInclFilter, List<String> colNameExclFilter, List<String> resNameInclFilter, List<String> resNameExclFilter) throws XMLDBException {
+		recursiveDownload(rootCollection, colNameInclFilter, colNameExclFilter, resNameInclFilter, resNameExclFilter);
+	}
+	
+	public void recursiveDownload(Collection c, List<String> colNameInclFilter, List<String> colNameExclFilter, List<String> resNameInclFilter, List<String> resNameExclFilter) throws XMLDBException {
+		final long tsStartRecursiveDownload = System.currentTimeMillis();
 
-					} catch (IOException e) {
-						for (ExistdbClientCallback ece : callbacks) {
-							ece.exceptionOccured(new ExistdbClientException("exception while downloading resource '" + resource.getId() + "'", e));
-						}
-						continue;
-					}
-					
-					for (ExistdbClientCallback ece : callbacks) {
-						ece.downloadFinished(xmlFile, System.currentTimeMillis() - tsStartCurrentResoruce);
-					}
-				}
-			}
-			
-		} catch (XMLDBException e) {
-			throw new ExistdbClientException("unable to download resources", e);
+		for (ExistdbClientCallback ece : callbacks) {
+			ece.recursiveDownloadStarted(c.getName());
 		}
 		
-		final long tsDuration = System.currentTimeMillis() - tsStartCompleteDownload;
+		recursiveDownload_impl(c, colNameInclFilter, colNameExclFilter, resNameInclFilter, resNameExclFilter);
+		
+		final long tsDuration = System.currentTimeMillis() - tsStartRecursiveDownload;
 		for (ExistdbClientCallback ece : callbacks) {
+			ece.recursiveDownloadFinished(c.getName(), tsDuration);
+		}
+	}
+	
+	private void recursiveDownload_impl(Collection c, List<String> colNameInclFilter, List<String> colNameExclFilter, List<String> resNameInclFilter, List<String> resNameExclFilter) throws XMLDBException {
+		
+		// should this collection be filtered by name?
+		String collectionName = c.getName();
+		if ((colNameInclFilter != null
+				&& !containsAsSubstring(collectionName, colNameInclFilter))
+			|| (colNameExclFilter != null
+				&& containsAsSubstring(collectionName, colNameExclFilter))
+			) {
+			// yes, skip this one
+			for (ExistdbClientCallback ece : callbacks) {
+				ece.collectionSkipped(collectionName);
+			}
+			return;
+		}
+		
+		// no, proceed with download
+		download(c, resNameInclFilter, resNameExclFilter);
+		
+		// are there any child collections?
+		String[] childCollectionNames = c.listChildCollections();
+		if (childCollectionNames == null) {
+			// no, nothing more to do
+			return;
+		}
+		
+		// yes, try to download them
+		for (String childCollectionName : childCollectionNames) {
+			Collection childCollection = c.getChildCollection(childCollectionName);
+			recursiveDownload_impl(childCollection, colNameInclFilter, colNameExclFilter, resNameInclFilter, resNameExclFilter);
+		}
+	}
+	
+	/**
+	 * <p>Downloads all resources from given {@link Collection} into {@link #getRootCollectionDirectory()}, using filtering if provided.</p>
+	 * 
+	 * @param resNameInclFilter include only resources with name being substring of this {@link List}, pass {@code null} for no filtering
+	 * @param resNameExclFilter exclude all resources with name being substring of this {@link List}, pass {@code null} for no filtering. When given, this filter is applied after inclusion.
+	 * @throws XMLDBException if unable to continue, recoverable exceptions will be forwarded to {@link ExistdbClientCallback#exceptionOccured(ExistdbClientException)}
+	 */
+	public void download(Collection c, List<String> resNameInclFilter, List<String> resNameExclFilter) throws XMLDBException {
+		final long tsStartCollectionDownload = System.currentTimeMillis();
+		
+		for (ExistdbClientCallback ece : callbacks) {
+			ece.collectionDownloadStarted(c.getName());
+		}
+		
+		download_impl(c, resNameInclFilter, resNameExclFilter);
+		
+		final long tsDuration = System.currentTimeMillis() - tsStartCollectionDownload;
+		for (ExistdbClientCallback ece : callbacks) {
+			ece.collectionDownloadFinished(c.getName(), tsDuration);
+		}
+	}
+	
+	private void download_impl(Collection c, List<String> resNameInclFilter, List<String> resNameExclFilter) throws XMLDBException {
+		
+		// are there any resources to download?
+		String[] resourceNames = c.listResources();
+		if (resourceNames == null) {
+			// no, nothing to do
+			return;
+		}
+		
+		// yes, try to download them
+		for (String resourceName : resourceNames) {
+			
+			// should this resource be filtered by name?
+			if ((resNameInclFilter != null
+					&& !containsAsSubstring(resourceName, resNameInclFilter))
+				|| (resNameExclFilter != null
+					&& containsAsSubstring(resourceName, resNameExclFilter))
+				) {
+				// yes, but try the others
+				for (ExistdbClientCallback ece : callbacks) {
+					ece.resourceSkipped(resourceName);
+				}
+				continue;
+			}
+			
+			// no, proceed with download
+			EXistResource resource = (EXistResource) c.getResource(resourceName);
 			try {
-				ece.downloadFinished(c.getName(), c.getResourceCount(), tsDuration);
+				resourceDownload(resource);
 				
-			} catch (XMLDBException e) {
-				throw new ExistdbClientException("can't get collection info", e);
+			} catch (IOException | XMLDBException e) {
+				// failed to download this one, but try the others
+				for (ExistdbClientCallback ece : callbacks) {
+					ece.exceptionOccured(new ExistdbClientException("exception while downloading resource '" + resourceName + "'", e));
+				}
+				continue;
 			}
 		}
 	}
 	
-	public void close() throws ExistdbClientException {
-		try {
-			if (rootCollection != null) {
-				rootCollection.close();
-			}
-		} catch (XMLDBException e) {
-			throw new ExistdbClientException("cannot close database connections", e);
+	/**
+	 * <p>Downloads a single resource.</p>
+	 * 
+	 * @param resource
+	 * @throws IOException when file-system exception occurs
+	 * @throws XMLDBException when database exception occurs
+	 */
+	public void resourceDownload(EXistResource resource) throws IOException, XMLDBException {
+		final long tsStartCurrentResoruce = System.currentTimeMillis();
+		final String resourceName = resource.getId();
+		
+		for (ExistdbClientCallback ece : callbacks) {
+			ece.resourceDownloadStarted(resourceName);
+		}
+
+		File downloadTo = new File(rootCollectionDir.getParent() + constructDbPathFor(resource));
+		if (!downloadTo.exists()
+				&& !downloadTo.mkdirs()) {
+			throw new IOException("could not create directory '" + downloadTo.getAbsolutePath() + "'");
+		}
+
+		File f = new File(downloadTo, resourceName);
+		if (f.exists()
+				&& !f.delete()) {
+			throw new IOException("could not delete file '" + f.getAbsolutePath() + "'");
+		}
+
+		if (!f.createNewFile()) {
+			throw new IOException("could not create file '" + f.getAbsolutePath() + "'");
+		}
+		
+		String xml = (String) resource.getContent();
+		FileOutputStream fos = new FileOutputStream(f);
+		OutputStreamWriter osw = new OutputStreamWriter(fos, StandardCharsets.UTF_8);
+		osw.write(xml);
+		osw.flush();
+		osw.close();
+
+		final long tsDuration = System.currentTimeMillis() - tsStartCurrentResoruce;
+		for (ExistdbClientCallback ece : callbacks) {
+			ece.resourceDownloadFinished(f, tsDuration);
+		}
+	}
+	
+	public void close() throws XMLDBException {
+		if (rootCollection != null) {
+			rootCollection.close();
 		}
 	}
 	
@@ -186,5 +237,25 @@ public class ExistdbClient {
 			}
 		}
 		return false;
+	}
+	
+	/**
+	 * <p>Constructs complete path of a resource within the database by traversing its parent collections up to the root level.</p>
+	 * <p>Uses {@link File#separator} as the separator.<p>
+	 * 
+	 * @param resource
+	 * @return complete path of a resource within the database
+	 * @throws XMLDBException when unable to traverse parent {@link Collection}s
+	 */
+	private String constructDbPathFor(EXistResource resource) throws XMLDBException {
+		String path = "";
+		Collection currentCollection = resource.getParentCollection();
+		while (currentCollection != null) {
+			String currentCollectionPath = currentCollection.getName();
+			String currentCollectionName = currentCollectionPath.substring(currentCollectionPath.lastIndexOf('/') + 1);
+			path = File.separator + currentCollectionName + path;
+			currentCollection = currentCollection.getParentCollection();
+		}
+		return path;
 	}
 }

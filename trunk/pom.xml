@@ -4,7 +4,7 @@
 
 	<groupId>at.ac.oeaw.acdh.bruckneronline.mermeid2git</groupId>
 	<artifactId>merMEId2git</artifactId>
-	<version>7</version>
+	<version>8</version>
 	<packaging>jar</packaging>
 
 	<name>merMEId2git</name>
