@@ -138,7 +138,7 @@ public class MainWindow extends JFrame {
 					@Override
 					protected Object doInBackground() throws Exception {
 						app.checkoutAll();
-//						app.pull();
+						app.pull();
 						app.cleanupLocalDataDirectory();
 						app.download();
 						return null;
