@@ -9,12 +9,12 @@ It is developed at the [Austrian Centre for Digital Humanities](https://www.oeaw
 * JRE 8 or higher version is required to run.
 * Clone the repository using `git clone https://github.com/acdh-oeaw/MerMEId2git.git` command.
 * There is pre-compiled JAR file, which you can run by `java -jar trunk/target/mermeid2git.jar` command.
-* Configuration file `settings.ini` with default values will be created as sibling to JAR file, in the same parent directory into which you place the JAR.
+* The JAR file can be copied into any folder, configuration file `settings.ini` with default values will be created as sibling to JAR file, in the same parent directory into which you place the JAR.
 
 ## Configuration
 
 * Upon first start (creation of `settings.ini` file described in previous step) a GUI window will pop up.
-* Following parameters are needed to be filled in:
+* Following parameters are needed to be set:
   * `DB URI` - eXist database URI, prefixed with `xmldb:exist://`
   * `DB user`, `DB password` - credentials to log into the eXist database. The password is stored locally.
   * `DB MerMEId collection` - pre-configured constant `dcm` will most likely not needed to be changed. It is name of eXist-db collection where MerMEI'd data XMLs reside.
